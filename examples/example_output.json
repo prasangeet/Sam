@@ -1,0 +1,15 @@
+{
+  "profile" : { //this will only exist if user has said something about themselves
+    "name": "",
+    "date_of_birth": "",
+    "anything_else": "",
+  },
+  "memory": { // for the llm to specifically remember if anything 
+
+  },
+  "response": { // this will be the current response
+    "role": "",
+    "content": "" // this will be the response of the llm that we will output and make our llm speak 
+  }
+}
+
