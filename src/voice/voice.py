@@ -1,60 +1,173 @@
 import queue
-import sounddevice as sd
-import vosk
-import json
-import pyttsx3
+import tempfile
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
-# -------------------------------
-# 🔊 TEXT TO SPEECH
-# -------------------------------
+import sounddevice as sd
+import scipy.io.wavfile as wav
+
+import pyttsx3
+
+from faster_whisper import (
+    WhisperModel
+)
+
+from src.observability.bus import (
+    event_bus
+)
+
+
+# -----------------------------------
+# Text To Speech
+# -----------------------------------
 engine = pyttsx3.init()
-engine.setProperty("rate", 170)
+
+engine.setProperty(
+    "rate",
+    170
+)
 
 
-def speak(text: str):
+def speak(
+    text: str
+):
+
+    event_bus.emit(
+        "tts_started",
+        {
+            "text": text
+        }
+    )
+
     print(f"Sam: {text}")
+
     engine.say(text)
+
     engine.runAndWait()
 
-
-# -------------------------------
-# 🎤 SPEECH TO TEXT
-# -------------------------------
-q = queue.Queue()
-
-
-def _callback(indata, frames, time, status):
-    if status:
-        print(status)
-    q.put(bytes(indata))
+    event_bus.emit(
+        "tts_completed",
+        {}
+    )
 
 
-# resolve model path safely
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "../../models/vosk-model-small-en-us-0.15")
+# -----------------------------------
+# Whisper Model
+# -----------------------------------
+MODEL_SIZE = "small.en"
 
-model = vosk.Model(MODEL_PATH)
-rec = vosk.KaldiRecognizer(model, 16000)
+model = WhisperModel(
+    MODEL_SIZE,
+    device="cpu",
+    compute_type="int8"
+)
+
+event_bus.emit(
+    "stt_model_loaded",
+    {
+        "model": MODEL_SIZE
+    }
+)
 
 
+# -----------------------------------
+# Audio Config
+# -----------------------------------
+SAMPLE_RATE = 16000
+
+CHANNELS = 1
+
+DURATION = 5
+
+
+# -----------------------------------
+# Record Audio
+# -----------------------------------
+def record_audio():
+
+    event_bus.emit(
+        "audio_recording_started",
+        {}
+    )
+
+    print("🎤 Listening...")
+
+    audio = sd.rec(
+        int(DURATION * SAMPLE_RATE),
+        samplerate=SAMPLE_RATE,
+        channels=CHANNELS,
+        dtype="int16"
+    )
+
+    sd.wait()
+
+    event_bus.emit(
+        "audio_recording_completed",
+        {}
+    )
+
+    return audio
+
+
+# -----------------------------------
+# Speech To Text
+# -----------------------------------
 def listen() -> str:
-    with sd.RawInputStream(
-        samplerate=16000,
-        blocksize=8000,
-        dtype="int16",
-        channels=1,
-        callback=_callback,
-    ):
-        print("🎤 Listening...")
 
-        while True:
-            data = q.get()
+    try:
 
-            if rec.AcceptWaveform(data):
-                result = json.loads(rec.Result())
-                text = result.get("text", "").strip()
+        audio = record_audio()
 
-                if text:
-                    print(f"You: {text}")
-                    return text
+        with tempfile.NamedTemporaryFile(
+            suffix=".wav"
+        ) as temp_audio:
+
+            wav.write(
+                temp_audio.name,
+                SAMPLE_RATE,
+                audio
+            )
+
+            event_bus.emit(
+                "transcription_started",
+                {}
+            )
+
+            segments, info = model.transcribe(
+                temp_audio.name,
+                beam_size=5
+            )
+
+            text = " ".join(
+                segment.text
+                for segment in segments
+            ).strip()
+
+            event_bus.emit(
+                "transcription_completed",
+                {
+                    "language": info.language,
+                    "text": text
+                }
+            )
+
+            if text:
+
+                print(f"You: {text}")
+
+            return text
+
+    except Exception as e:
+
+        event_bus.emit(
+            "transcription_failed",
+            {
+                "error": str(e)
+            }
+        )
+
+        print(
+            f"[Voice Error] {e}"
+        )
+
+        return ""

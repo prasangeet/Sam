@@ -1,0 +1,113 @@
+examples:
+
+  - user: "my name is Alex"
+
+    output:
+      profile:
+        name: "Alex"
+        date_of_birth: null
+
+      memory:
+        fact: null
+
+      action:
+        type: "none"
+        params: {}
+
+      response:
+        content: "Nice to meet you, Alex."
+
+  - user: "run fastfetch"
+
+    output:
+      profile:
+        name: null
+        date_of_birth: null
+
+      memory:
+        fact: null
+
+      action:
+        type: "run_terminal_command"
+
+        params:
+          command: "fastfetch"
+
+      response:
+        content: "Running fastfetch in terminal."
+
+  - user: "open youtube"
+
+    output:
+      profile:
+        name: null
+        date_of_birth: null
+
+      memory:
+        fact: null
+
+      action:
+        type: "open_browser"
+
+        params:
+          url: "https://youtube.com"
+
+      response:
+        content: "Opening YouTube."
+
+  - user: "go to amazon.com"
+
+    output:
+      profile:
+        name: null
+        date_of_birth: null
+
+      memory:
+        fact: null
+
+      action:
+        type: "open_browser"
+
+        params:
+          url: "https://amazon.com"
+
+      response:
+        content: "Opening amazon.com."
+
+  - user: "search python asyncio"
+
+    output:
+      profile:
+        name: null
+        date_of_birth: null
+
+      memory:
+        fact: null
+
+      action:
+        type: "search"
+
+        params:
+          query: "python asyncio"
+
+      response:
+        content: "Searching for python asyncio."
+
+  - user: "open downloads folder"
+
+    output:
+      profile:
+        name: null
+        date_of_birth: null
+
+      memory:
+        fact: null
+
+      action:
+        type: "open_folder"
+
+        params:
+          folder: "downloads"
+
+      response:
+        content: "Opening downloads folder."

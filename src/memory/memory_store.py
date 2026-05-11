@@ -1,21 +1,47 @@
 import sqlite3
 import json
-from typing import Dict, List, Optional
+
+from typing import Dict
+from typing import List
+from typing import Optional
+
+from src.observability.bus import (
+    event_bus
+)
+
 
 DB_PATH = "memory.db"
 
 
 class MemoryStore:
-    def __init__(self, db_path: str = DB_PATH):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+
+    def __init__(
+        self,
+        db_path: str = DB_PATH
+    ):
+
+        self.conn = sqlite3.connect(
+            db_path,
+            check_same_thread=False
+        )
+
         self.conn.row_factory = sqlite3.Row
+
         self._create_tables()
 
+        event_bus.emit(
+            "memory_initialized",
+            {
+                "db_path": db_path
+            }
+        )
+
     # -----------------------------------
-    # 🧱 TABLE SETUP
+    # TABLE SETUP
     # -----------------------------------
     def _create_tables(self):
-        # 👤 Profile (long-term identity)
+
+        # Profile table
         self.conn.execute("""
         CREATE TABLE IF NOT EXISTS profile (
             key TEXT PRIMARY KEY,
@@ -23,7 +49,7 @@ class MemoryStore:
         )
         """)
 
-        # 💬 Event-based history
+        # History table
         self.conn.execute("""
         CREATE TABLE IF NOT EXISTS history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +61,7 @@ class MemoryStore:
         )
         """)
 
-        # 🧠 Flexible memory (future use)
+        # Memory table
         self.conn.execute("""
         CREATE TABLE IF NOT EXISTS memory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,43 +72,112 @@ class MemoryStore:
 
         self.conn.commit()
 
+        event_bus.emit(
+            "memory_tables_created",
+            {}
+        )
+
     # -----------------------------------
-    # 👤 PROFILE METHODS
+    # PROFILE METHODS
     # -----------------------------------
-    def set_profile(self, key: str, value: str):
+    def set_profile(
+        self,
+        key: str,
+        value: str
+    ):
+
         self.conn.execute(
-            "INSERT OR REPLACE INTO profile (key, value) VALUES (?, ?)",
+            """
+            INSERT OR REPLACE INTO
+            profile (key, value)
+            VALUES (?, ?)
+            """,
             (key, value)
         )
+
         self.conn.commit()
 
-    def get_profile_value(self, key: str) -> Optional[str]:
+        event_bus.emit(
+            "profile_value_set",
+            {
+                "key": key
+            }
+        )
+
+    def get_profile_value(
+        self,
+        key: str
+    ) -> Optional[str]:
+
         cursor = self.conn.execute(
-            "SELECT value FROM profile WHERE key=?",
+            """
+            SELECT value
+            FROM profile
+            WHERE key=?
+            """,
             (key,)
         )
+
         row = cursor.fetchone()
+
         return row["value"] if row else None
 
-    def update_profile(self, updates: Dict):
+    def update_profile(
+        self,
+        updates: Dict
+    ):
+
         if not updates:
             return
 
-        # 🔒 whitelist (critical)
-        allowed_keys = ["name", "date_of_birth"]
+        allowed_keys = [
+            "name",
+            "date_of_birth"
+        ]
+
+        updated_keys = []
 
         for k, v in updates.items():
+
             if k in allowed_keys and v:
+
                 self.set_profile(k, v)
 
+                updated_keys.append(k)
+
+        if updated_keys:
+
+            event_bus.emit(
+                "profile_updated",
+                {
+                    "keys": updated_keys
+                }
+            )
+
     def get_profile(self) -> Dict:
-        return {
-            "name": self.get_profile_value("name"),
-            "date_of_birth": self.get_profile_value("date_of_birth"),
+
+        profile = {
+            "name": self.get_profile_value(
+                "name"
+            ),
+            "date_of_birth": self.get_profile_value(
+                "date_of_birth"
+            ),
         }
 
+        event_bus.emit(
+            "profile_loaded",
+            {
+                "has_name": bool(
+                    profile["name"]
+                )
+            }
+        )
+
+        return profile
+
     # -----------------------------------
-    # 💬 HISTORY (EVENT-BASED)
+    # HISTORY METHODS
     # -----------------------------------
     def add_event(
         self,
@@ -91,24 +186,49 @@ class MemoryStore:
         action_type: Optional[str] = None,
         action_params: Optional[Dict] = None
     ):
+
         self.conn.execute(
             """
-            INSERT INTO history (role, content, action_type, action_params)
+            INSERT INTO history
+            (
+                role,
+                content,
+                action_type,
+                action_params
+            )
             VALUES (?, ?, ?, ?)
             """,
             (
                 role,
                 content,
                 action_type,
-                json.dumps(action_params) if action_params else None
+                json.dumps(action_params)
+                if action_params else None
             )
         )
+
         self.conn.commit()
 
-    def get_recent_events(self, limit: int = 10) -> List[Dict]:
+        event_bus.emit(
+            "history_event_added",
+            {
+                "role": role,
+                "action_type": action_type
+            }
+        )
+
+    def get_recent_events(
+        self,
+        limit: int = 10
+    ) -> List[Dict]:
+
         cursor = self.conn.execute(
             """
-            SELECT role, content, action_type, action_params
+            SELECT
+                role,
+                content,
+                action_type,
+                action_params
             FROM history
             ORDER BY id DESC
             LIMIT ?
@@ -119,53 +239,124 @@ class MemoryStore:
         rows = cursor.fetchall()
 
         events = []
+
         for row in reversed(rows):
+
             events.append({
                 "role": row["role"],
                 "content": row["content"],
                 "action_type": row["action_type"],
-                "action_params": json.loads(row["action_params"])
-                if row["action_params"] else None
+                "action_params":
+                    json.loads(
+                        row["action_params"]
+                    )
+                    if row["action_params"]
+                    else None
             })
+
+        event_bus.emit(
+            "history_loaded",
+            {
+                "count": len(events)
+            }
+        )
 
         return events
 
     def clear_history(self):
-        self.conn.execute("DELETE FROM history")
+
+        self.conn.execute(
+            "DELETE FROM history"
+        )
+
         self.conn.commit()
 
+        event_bus.emit(
+            "history_cleared",
+            {}
+        )
+
     # -----------------------------------
-    # 🧠 LONG-TERM MEMORY (OPTIONAL)
+    # LONG TERM MEMORY
     # -----------------------------------
-    def add_memory(self, content: str):
+    def add_memory(
+        self,
+        content: str
+    ):
+
         self.conn.execute(
-            "INSERT INTO memory (content) VALUES (?)",
+            """
+            INSERT INTO memory
+            (content)
+            VALUES (?)
+            """,
             (content,)
         )
+
         self.conn.commit()
 
-    def get_memories(self, limit: int = 5) -> List[str]:
+        event_bus.emit(
+            "memory_added",
+            {
+                "content": content
+            }
+        )
+
+    def get_memories(
+        self,
+        limit: int = 5
+    ) -> List[str]:
+
         cursor = self.conn.execute(
             """
-            SELECT content FROM memory
+            SELECT content
+            FROM memory
             ORDER BY id DESC
             LIMIT ?
             """,
             (limit,)
         )
-        return [row["content"] for row in cursor.fetchall()]
+
+        memories = [
+            row["content"]
+            for row in cursor.fetchall()
+        ]
+
+        event_bus.emit(
+            "memories_loaded",
+            {
+                "count": len(memories)
+            }
+        )
+
+        return memories
 
     # -----------------------------------
-    # 🧠 CONTEXT BUILDER (FOR LLM)
+    # CONTEXT BUILDER
     # -----------------------------------
-    def build_context(self, event_limit: int = 6):
-        """
-        Build structured context for LLM.
-        Keeps it SMALL and RELEVANT.
-        """
+    def build_context(
+        self,
+        event_limit: int = 6
+    ):
 
-        return {
+        context = {
             "profile": self.get_profile(),
-            "history": self.get_recent_events(event_limit),
+            "history": self.get_recent_events(
+                event_limit
+            ),
             "memories": self.get_memories(3)
         }
+
+        event_bus.emit(
+            "context_constructed",
+            {
+                "history_count": len(
+                    context["history"]
+                ),
+                "memory_count": len(
+                    context["memories"]
+                )
+            }
+        )
+
+        return context
